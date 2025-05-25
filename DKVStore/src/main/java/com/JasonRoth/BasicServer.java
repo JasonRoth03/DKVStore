@@ -43,9 +43,7 @@ public class BasicServer{
         //Create server contexts
         server.createContext("/put", new PutHandler(dataStore));
         server.createContext("/get", new GetHandler(dataStore));
-        server.createContext("/delete", new DeleteHandler());
-
-
+        server.createContext("/delete", new DeleteHandler(dataStore));
     }
 
     public void start(){
