@@ -14,9 +14,7 @@ import java.io.InputStreamReader;
 import java.util.Map;
 
 /**
- * Receives a POST request for the key value store and passes along the key & value in the body
- *
- *
+ * Handles put requests for the key value store
  */
 public class PutHandler implements HttpHandler {
     private Map<String, String> dataStore;

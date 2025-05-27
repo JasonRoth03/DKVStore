@@ -10,6 +10,9 @@ import com.sun.net.httpserver.HttpHandler;
 import java.io.IOException;
 import java.util.Map;
 
+/**
+ * Handles delete requests for the key value store
+ */
 public class DeleteHandler implements HttpHandler {
     private Map<String, String> dataStore;
 
