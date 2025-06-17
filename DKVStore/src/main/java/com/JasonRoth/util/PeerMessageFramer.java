@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 /**
  * Utility class for reading and writing Inter-Node messages via TCP
  */
-public class InterNodeMessageFramer {
+public class PeerMessageFramer {
 
     //Maximum message size default is 4MB
     private static final int MAX_ALLOWED_MESSAGE_SIZE = 4 * 1024 * 1024;
