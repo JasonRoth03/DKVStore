@@ -36,7 +36,7 @@ public class BasicServer implements LoggingServer {
         logger = Logger.getLogger(this.getClass().getCanonicalName() + ":" + port);
         InetSocketAddress serverAddress = new InetSocketAddress(port);
         try {
-            tcpServer = new TCPServer(port + 2);
+            tcpServer = new TCPServer(port + 2, dataStore);
             pinger = new Pinger(addresses, port + 1);
         } catch (IOException e) {
             throw new RuntimeException(e);
