@@ -1,11 +1,13 @@
 package com.JasonRoth;
 
-import com.JasonRoth.util.LoggingServer;
+import com.JasonRoth.Logging.LoggingServer;
+import com.JasonRoth.Messaging.PeerMessageFramer;
+import com.JasonRoth.Messaging.PeerMessageHandler;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -23,6 +25,7 @@ public class Pinger extends Thread implements LoggingServer {
     private List<InetSocketAddress> addresses;
     private Thread curentThread = null;
     private int MAX_RETRIES = 5;
+    private ObjectMapper mapper;
 
     //store which addresses have responded
     Map<InetSocketAddress, Boolean> pings = new HashMap<>();
@@ -32,12 +35,14 @@ public class Pinger extends Thread implements LoggingServer {
     public Pinger(List<InetSocketAddress> addresses, int port) throws IOException {
         this.addresses = addresses;
         this.logger = initializeLogging(this.getClass().getCanonicalName() + "_Port:" + port);
+        this.mapper = new ObjectMapper();
+        this.mapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
 
 
     /**
      * Send pings to peers, log successful ping and set address map to true.
-     * use backoff and retries on unsuccessful connection to allow servers to start
+     * Use backoff and retries on unsuccessful connection to allow servers to start
      */
     @Override
     public void run() {
@@ -46,15 +51,25 @@ public class Pinger extends Thread implements LoggingServer {
             if(pings.size() == addresses.size()){
                 continue;
             }
-            for(InetSocketAddress address : addresses){
-                //tcp server listens on server address port + 2
-                pings.put(address, sendWithRetry("ping\n", address.getHostName(), address.getPort() + 2));
+            for (InetSocketAddress address : addresses) {
+                // Only ping if we haven't already received a successful pong from this address
+                if (!pings.getOrDefault(address, false)) {
+                    boolean success = sendWithRetry(address.getHostName(), address.getPort() + 2);
+                    pings.put(address, success);
+                    if (success) {
+                        logger.log(Level.INFO, "Peer " + address + " is now marked as reachable.");
+                    }
+                }
             }
-            logger.log(Level.INFO, "Ping results:" + pings);
+            try {
+                logger.log(Level.INFO, "Ping results:" + mapper.writeValueAsString(pings));
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
-    private boolean sendWithRetry(String message, String host, int port){
+    private boolean sendWithRetry(String host, int port){
         int attempt = 0;
         int readTimeout = 5000;
         long backOff = 500;
@@ -63,15 +78,15 @@ public class Pinger extends Thread implements LoggingServer {
             Socket socket = null;
             try {
                 socket = new Socket(host, port);
-                socket.getOutputStream().write(message.getBytes());
-                socket.getOutputStream().flush();
+                DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
+                PeerMessageFramer.writeMessage(dos, PeerMessageHandler.MessageType.PING.getByteCode(), null);
                 socket.setSoTimeout(readTimeout);
                 //get the response
                 try{
-                    InputStream in = socket.getInputStream();
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(in));
-                    String response = reader.readLine();
-                    if(response.equals("pong")){
+                    DataInputStream dis = new DataInputStream(socket.getInputStream());
+                    PeerMessageFramer.FramedMessage framedMessage = PeerMessageFramer.readNextMessage(dis);
+                    PeerMessageHandler.MessageType responseType = PeerMessageHandler.MessageType.fromByteCode(framedMessage.messageType);
+                    if(responseType == PeerMessageHandler.MessageType.PONG){
                         logger.log(Level.INFO, "Pong response from host: " + host + " port: " + port);
                         return true;
                     }

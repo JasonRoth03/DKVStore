@@ -1,4 +1,4 @@
-package com.JasonRoth.util;
+package com.JasonRoth.Messaging;
 
 public class KeyValue {
     private String key;

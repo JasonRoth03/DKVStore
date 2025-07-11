@@ -1,16 +1,14 @@
-package com.JasonRoth.util;
+package com.JasonRoth.Messaging;
 
 public class ResponseMessage {
     private String status;
-    private String message;
     private String key;
 
     public ResponseMessage(){}
 
-    public ResponseMessage(String status, String key, String message) {
+    public ResponseMessage(String status, String key) {
         this.status = status;
         this.key = key;
-        this.message = message;
     }
 
     public String getStatus() {
@@ -19,14 +17,6 @@ public class ResponseMessage {
 
     public void setStatus(String status) {
         this.status = status;
-    }
-
-    public String getMessage() {
-        return message;
-    }
-
-    public void setMessage(String message) {
-        this.message = message;
     }
 
     public String getKey() {

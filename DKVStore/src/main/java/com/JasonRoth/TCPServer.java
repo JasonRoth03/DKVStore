@@ -1,10 +1,12 @@
-package com.JasonRoth.util;
+package com.JasonRoth;
+
+import com.JasonRoth.Logging.LoggingServer;
+import com.JasonRoth.Messaging.PeerMessageHandler;
 
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.logging.Level;
@@ -13,7 +15,7 @@ import java.util.logging.Logger;
 /**
  * TCP server being run on specified port, handles internode communication
  */
-public class TCPServer extends Thread implements LoggingServer{
+public class TCPServer extends Thread implements LoggingServer {
     private ServerSocket serverSocket;
     private Logger logger;
     private volatile boolean running = true;

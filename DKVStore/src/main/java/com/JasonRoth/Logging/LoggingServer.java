@@ -1,4 +1,4 @@
-package com.JasonRoth.util;
+package com.JasonRoth.Logging;
 
 import java.io.File;
 import java.io.IOException;

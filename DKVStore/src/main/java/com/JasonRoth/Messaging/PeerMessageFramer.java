@@ -1,4 +1,4 @@
-package com.JasonRoth.util;
+package com.JasonRoth.Messaging;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -7,7 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Utility class for reading and writing Inter-Node messages via TCP
+ * Utility class for framing Inter-Node messages communicated via TCP
  */
 public class PeerMessageFramer {
 
@@ -17,7 +17,7 @@ public class PeerMessageFramer {
     /**
      * Inner class to hold de-framed messages
      */
-    public class FramedMessage{
+    public static class FramedMessage{
         public final byte messageType;
         public final byte[] payload;
 
@@ -38,14 +38,14 @@ public class PeerMessageFramer {
 
     /**
      * Messages are framed as:
-     * 1 byte - length of payload in bytes + 1 for type byte
+     * 4 bytes - length of payload in bytes
      * 1 byte - corresponds to a message type
      * n bytes - length of the payload
-     * @param dis
+     * @param dis the data input stream where messages are being read
      * @return FramedMessage object representing the message that was read
      * @throws IOException
      */
-    public FramedMessage readNextMessage(DataInputStream dis) throws IOException {
+    public static FramedMessage readNextMessage(DataInputStream dis) throws IOException {
         int length;
         try{
             length = dis.readInt();
@@ -62,7 +62,7 @@ public class PeerMessageFramer {
         }
 
         byte messageType = dis.readByte();
-        int payloadLength = length - 1;
+        int payloadLength = length - 1; //the length in bytes minus 1 byte used for a message type
         if(payloadLength < 0){
             throw new IOException("Invalid message length, payload length must not be a negative number");
         }
@@ -71,18 +71,18 @@ public class PeerMessageFramer {
             dis.readFully(payload);
         }
 
-        //if the payload is 0 then nothing is read
+        //if the payload length is 0, then nothing is read
         return new FramedMessage(messageType, payload);
     }
 
     /**
-     * writes a message on the provided output stream as a length prefixed message
+     * writes a message on the provided output stream as a length prefixed message and flushes the output
      * @param dos - the DataOutputStream for the connection
      * @param messageType - the message type as a byte
      * @param payload - the payload of the message as a byte array
      * @throws IOException if an i/o error occurs when trying to write to the stream
      */
-    public void writeMessage(DataOutputStream dos, byte messageType, byte[] payload) throws IOException {
+    public static void writeMessage(DataOutputStream dos, byte messageType, byte[] payload) throws IOException {
         int payloadLength = (payload == null ? 0 : payload.length);
         int messageLength = payloadLength + 1;
         dos.writeInt(messageLength);
@@ -90,7 +90,7 @@ public class PeerMessageFramer {
         if(payloadLength > 0){
             dos.write(payload);
         }
-        //ensures the message is sent right away
+        //flush any buffered output bytes to the data stream
         dos.flush();
     }
 }
