@@ -33,7 +33,7 @@ public class Runner {
 
         while(true) {
             String input = in.nextLine();
-            //Enter "exit" int the terminal to stop key value store
+            //Enter "exit" into the terminal to stop key value store
             if(input.equals("exit")) {
                 //stop the 10 servers
                 for(BasicServer server : servers) {
