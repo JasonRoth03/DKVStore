@@ -1,11 +1,11 @@
 package com.JasonRoth.handlers;
 
+import com.JasonRoth.ConsistentHashingManager;
 import com.JasonRoth.Messaging.PeerMessageFramer;
 import com.JasonRoth.Messaging.PeerMessageHandler;
 import com.JasonRoth.util.HttpUtils;
 import com.JasonRoth.Messaging.KeyValue;
 import com.JasonRoth.Messaging.ResponseMessage;
-import com.JasonRoth.util.PartitionManager;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
@@ -26,12 +26,14 @@ import java.util.logging.Logger;
  */
 public class PutHandler implements HttpHandler {
     private Map<String, String> dataStore;
-    private PartitionManager partitionManager;
+    private ConsistentHashingManager hashingManager;
     private final Logger logger;
+    private String selfAddressString;
 
-    public PutHandler(Map<String, String> dataStore, PartitionManager partitionManager, Logger logger) {
+    public PutHandler(String selfAddressString, Map<String, String> dataStore, ConsistentHashingManager hashingManager, Logger logger) {
+        this.selfAddressString = selfAddressString;
         this.dataStore = dataStore;
-        this.partitionManager = partitionManager;
+        this.hashingManager = hashingManager;
         this.logger = logger;
     }
 
@@ -76,10 +78,10 @@ public class PutHandler implements HttpHandler {
                 String message = mapper.writeValueAsString(error);
                 HttpUtils.sendResponse(exchange, 500, message);
             }
-            InetSocketAddress ownerNode = partitionManager.getNodeForKey(kv.getKey());
-            logger.log(Level.INFO, "self address: " + partitionManager.getSelfAddress());
+            String ownerNode = hashingManager.getNodeForKey(kv.getKey());
+            logger.log(Level.INFO, "Owner Node Address: " + ownerNode);
             //Using Partition Manager
-            if(ownerNode.equals(partitionManager.getSelfAddress())){
+            if(ownerNode.equals(selfAddressString)){
                 //The Key belongs to this node partition
                 logger.log(Level.INFO, "Processing Put request on this Node");
                 dataStore.put(kv.getKey(), kv.getValue());
@@ -87,17 +89,20 @@ public class PutHandler implements HttpHandler {
                 String message = mapper.writeValueAsString(success);
                 HttpUtils.sendResponse(exchange, 200, message);
             }else{
-                try(Socket socket = new Socket(ownerNode.getHostName(), ownerNode.getPort() + 2);
+                String[] ownerAddressString = ownerNode.split(":");
+                String ownerHost = ownerAddressString[0];
+                int ownerPort = Integer.parseInt(ownerAddressString[1]);
+                try(Socket socket = new Socket(ownerHost, ownerPort);
                     DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
                     DataInputStream dis = new DataInputStream(socket.getInputStream())){
 
                     PeerMessageFramer.writeMessage(dos, PeerMessageHandler.MessageType.FORWARD_PUT_REQUEST.getByteCode(), requestBody.getBytes(StandardCharsets.UTF_8));
-                    logger.log(Level.INFO, "Forwarding PUT request to " + ownerNode.getHostName() + ":" + ownerNode.getPort());
+                    logger.log(Level.INFO, "Forwarding PUT request to " + ownerNode);
 
                     //get the response back from the owner node
                     PeerMessageFramer.FramedMessage response = PeerMessageFramer.readNextMessage(dis);
                     PeerMessageHandler.MessageType type = PeerMessageHandler.MessageType.fromByteCode(response.messageType);
-                    logger.log(Level.INFO, "Received " + type + " from peer: " + ownerNode.getHostName() + ":" + ownerNode.getPort());
+                    logger.log(Level.INFO, "Received " + type + " from peer: " + ownerNode);
                     ResponseMessage responseMessage = new ResponseMessage(response.getPayloadAsString(), kv.getKey());
                     String message = mapper.writeValueAsString(responseMessage);
                     HttpUtils.sendResponse(exchange, 200, message);

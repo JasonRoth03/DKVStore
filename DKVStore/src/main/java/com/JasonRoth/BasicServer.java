@@ -4,13 +4,12 @@ import com.JasonRoth.handlers.DeleteHandler;
 import com.JasonRoth.handlers.GetHandler;
 import com.JasonRoth.handlers.PutHandler;
 import com.JasonRoth.Logging.LoggingServer;
-import com.JasonRoth.util.PartitionManager;
 import com.sun.net.httpserver.HttpServer;
+import org.apache.zookeeper.WatchedEvent;
+import org.apache.zookeeper.Watcher;
 
 import java.io.IOException;
-import java.net.BindException;
 import java.net.InetSocketAddress;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
@@ -19,68 +18,73 @@ import java.util.logging.Logger;
 /**
  * Basic Http server to handle the Key Value Stores endpoints
  */
-public class BasicServer implements LoggingServer {
+public class BasicServer implements LoggingServer, Watcher {
     private Map<String, String> dataStore; //Hashmap acts as a basic in-memory key value store
-    private List<InetSocketAddress> addresses; // List of peer addresses
     private Logger logger;
     private TCPServer tcpServer;
-    private Pinger pinger;
-
-    private int port; //
     private HttpServer server;
+    private String selfAddressString;
 
-    public BasicServer(InetSocketAddress serverAddress, int port, List<InetSocketAddress> addresses) throws IOException {
-        this.port = port;
+    private ZooKeeperManager zkManager;
+    private ConsistentHashingManager hashingManager;
+
+    public BasicServer(InetSocketAddress serverAddress, int tcpPort) throws IOException {
+        this.selfAddressString = serverAddress.getHostString() + ":" + tcpPort;
         dataStore = new ConcurrentHashMap<>();
-        this.addresses = addresses;
-        logger = Logger.getLogger(this.getClass().getCanonicalName() + ":" + port);
+        logger = initializeLogging(this.getClass().getCanonicalName() + ":" + serverAddress.getPort());
 
-        try {
-            tcpServer = new TCPServer(port + 2, dataStore);
-            pinger = new Pinger(addresses, port + 1);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        tcpServer = new TCPServer(tcpPort, dataStore);
+
+        zkManager = new ZooKeeperManager();
+        hashingManager = new ConsistentHashingManager(10);//10 virtual nodes per server
 
         try{
              server = HttpServer.create(serverAddress, 0);
-        }catch (BindException be){
-            System.err.println("Bind exception when creating server");
-            be.printStackTrace();
-            System.exit(1);
         }catch (IOException ioe){
-            System.err.println("I/O exception when creating server");
-            ioe.printStackTrace();
+            System.err.println("Could not create HttpServer: " + ioe.getMessage());
             System.exit(1);
-        }
-        PartitionManager partitionManager;
-        try{
-            partitionManager = new PartitionManager(serverAddress, addresses);
-        }catch (IOException ioe){
-            logger.log(Level.SEVERE, "IO exception when creating partition manager");
-            throw new IOException(ioe);
         }
 
         //Create server contexts
-        server.createContext("/put", new PutHandler(dataStore, partitionManager, logger)); //endpoint for putting a new key value pair into the datastore
-        server.createContext("/get", new GetHandler(dataStore, partitionManager, logger)); //endpoint for getting a value for a key
-        server.createContext("/delete", new DeleteHandler(dataStore, partitionManager, logger)); //endpoint for deleting a key value pair from the datastore
+        server.createContext("/put", new PutHandler(selfAddressString, dataStore, hashingManager, logger)); //endpoint for putting a new key value pair into the datastore
+        server.createContext("/get", new GetHandler(selfAddressString, dataStore, hashingManager, logger)); //endpoint for getting a value for a key
+        server.createContext("/delete", new DeleteHandler(selfAddressString, dataStore, hashingManager, logger)); //endpoint for deleting a key value pair from the datastore
     }
 
-    public void start(){
+    public void start() throws IOException, InterruptedException {
+        //Connect to zookeeper and register this node
+        zkManager.connect();
+        try{
+            //register and set a watch
+            zkManager.registerNode(selfAddressString, this);
+        } catch (Exception e) {
+            logger.log(Level.SEVERE, "Failed to register with ZooKeeper", e);
+            throw new IOException("Could not start server, ZK registration failed");
+        }
         server.start(); // starts the server that handles basic http endpoints
         tcpServer.start(); // starts the tcp server that handles internode communication on this.port + 2
-        pinger.start(); // Starts the pinger on this.port + 1
+        logger.log(Level.INFO, "Server started on " + selfAddressString);
+        logger.log(Level.INFO, "Current ring nodes: " + hashingManager.ring.values());
     }
 
-    public void stop(){
+    public void stop() throws InterruptedException {
         server.stop(0);
-        if(tcpServer.isAlive()){
-            tcpServer.shutdown();
-        }
-        if(pinger.isAlive()){
-            pinger.shutdown();
-        }
+        tcpServer.shutdown();
+        zkManager.close();
+        logger.log(Level.INFO, "Server stopped.");
     }
 
+    //This is the Watcher callback method
+    @Override
+    public void process(WatchedEvent event) {
+        if(event.getType() == Event.EventType.NodeChildrenChanged && event.getPath().equals(ZooKeeperManager.ZK_NODES_PATH)) {
+            try{
+                logger.log(Level.INFO, "Node membership changed. Rebuilding hashing ring...");
+                hashingManager.updateNodes(zkManager.getLiveNodes()); //Re-fetch and update the ring
+                logger.log(Level.INFO, "New ring nodes: " + hashingManager.ring.values());
+            }catch (Exception e){
+                logger.log(Level.SEVERE, "Error updating node list from ZooKeeper", e);
+            }
+        }
+    }
 }

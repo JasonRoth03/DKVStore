@@ -1,10 +1,10 @@
 package com.JasonRoth.handlers;
 
+import com.JasonRoth.ConsistentHashingManager;
 import com.JasonRoth.Messaging.PeerMessageFramer;
 import com.JasonRoth.Messaging.PeerMessageHandler;
 import com.JasonRoth.util.HttpUtils;
 import com.JasonRoth.Messaging.ResponseMessage;
-import com.JasonRoth.util.PartitionManager;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -22,13 +22,15 @@ import java.util.logging.*;
  * Handles delete requests for the key value store
  */
 public class DeleteHandler implements HttpHandler {
+    private String selfAddressString;
     private Map<String, String> dataStore;
-    private PartitionManager partitionManager;
+    private ConsistentHashingManager hashingManager;
     private Logger logger;
 
-    public DeleteHandler(Map<String, String> dataStore,  PartitionManager partitionManager, Logger logger) {
+    public DeleteHandler(String selfAddressString, Map<String, String> dataStore, ConsistentHashingManager hashingManager, Logger logger) {
+        this.selfAddressString = selfAddressString;
         this.dataStore = dataStore;
-        this.partitionManager = partitionManager;
+        this.hashingManager = hashingManager;
         this.logger = logger;
     }
 
@@ -54,8 +56,8 @@ public class DeleteHandler implements HttpHandler {
                 String message = mapper.writeValueAsString(valueErr);
                 HttpUtils.sendResponse(exchange, 404, message);
             }
-            InetSocketAddress ownerNode = partitionManager.getNodeForKey(key);
-            if(ownerNode.equals(partitionManager.getSelfAddress())){
+            String ownerNode = hashingManager.getNodeForKey(key);
+            if(ownerNode.equals(selfAddressString)) {
                 boolean exists = dataStore.keySet().contains(key);
                 if(exists) {
                     dataStore.remove(key);
@@ -68,15 +70,18 @@ public class DeleteHandler implements HttpHandler {
                     HttpUtils.sendResponse(exchange, 404, message);
                 }
             }else{
+                String[] ownerAddressString = ownerNode.split(":");
+                String ownerHost = ownerAddressString[0];
+                int ownerPort = Integer.parseInt(ownerAddressString[1]);
                 //forward delete request to the owner node
-                try(Socket socket = new Socket(ownerNode.getAddress(), ownerNode.getPort() + 2)) {
+                try(Socket socket = new Socket(ownerHost, ownerPort)) {
                     DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
                     DataInputStream dis = new DataInputStream(socket.getInputStream());
                     PeerMessageFramer.writeMessage(dos, PeerMessageHandler.MessageType.FORWARD_DELETE_REQUEST.getByteCode(), key.getBytes(StandardCharsets.UTF_8));
 
                     PeerMessageFramer.FramedMessage response = PeerMessageFramer.readNextMessage(dis);
                     PeerMessageHandler.MessageType type = PeerMessageHandler.MessageType.fromByteCode(response.messageType);
-                    logger.log(Level.INFO, "Received " + type + " from peer: " + ownerNode.getHostName() + ":" + ownerNode.getPort());
+                    logger.log(Level.INFO, "Received " + type + " from peer: " + selfAddressString);
                     String message = response.getPayloadAsString();
                     HttpUtils.sendResponse(exchange, 204, message);
                 }
