@@ -103,8 +103,9 @@ public class BasicServer implements LoggingServer, Watcher {
         if(event.getType() == Event.EventType.NodeChildrenChanged && event.getPath().equals(ZooKeeperManager.ZK_NODES_PATH)) {
             try{
                 logger.log(Level.INFO, "Node membership changed. Rebuilding hashing ring...");
-                hashingManager.updateNodes(zkManager.getLiveNodes()); //Re-fetch and update the ring
-                logger.log(Level.INFO, "New ring nodes: " + hashingManager.ring.values());
+                List<String> liveNodes = zkManager.getLiveNodes();
+                hashingManager.updateNodes(liveNodes); //Re-fetch and update the ring
+                logger.log(Level.INFO, "New ring nodes: " + liveNodes);
             }catch (Exception e){
                 logger.log(Level.SEVERE, "Error updating node list from ZooKeeper", e);
             }

@@ -27,7 +27,7 @@ public class ConsistentHashingManager {
         }
     }
 
-    public String getNodeForKey(String key){
+    public synchronized String getNodeForKey(String key){
         if(ring.isEmpty()){
             System.out.println("Ring is empty");
             return null;
