@@ -41,8 +41,8 @@ public class ZooKeeperManager {
         zooKeeper.getChildren(ZK_NODES_PATH, watcher);
     }
 
-    public List<String> getLiveNodes() throws KeeperException, InterruptedException {
-        return zooKeeper.getChildren(ZK_NODES_PATH, true);
+    public List<String> getLiveNodes(Watcher watcher) throws KeeperException, InterruptedException {
+        return zooKeeper.getChildren(ZK_NODES_PATH, watcher);
     }
 
     public void close() throws InterruptedException {

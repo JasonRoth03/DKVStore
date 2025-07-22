@@ -2,9 +2,7 @@ package com.JasonRoth;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Collection;
-import java.util.SortedMap;
-import java.util.TreeMap;
+import java.util.*;
 
 public class ConsistentHashingManager {
     final SortedMap<Long, String> ring = new TreeMap<>();
@@ -39,6 +37,30 @@ public class ConsistentHashingManager {
             hash = tailMap.isEmpty() ? ring.firstKey() : tailMap.firstKey();
         }
         return ring.get(hash);
+    }
+
+    public synchronized List<String> getNodesForKey(String key, int replicas){
+        System.out.println("Getting nodes for key: " + key);
+        if(ring.isEmpty()){
+            System.out.println("Ring is empty");
+            return null;
+        }
+
+        List<String> nodes = new ArrayList<>();
+        Set<String> uniqueNodes = new LinkedHashSet<>();
+        long hash = hash(key);
+
+        Iterator<Long> it = ring.tailMap(hash).keySet().iterator();
+        while(uniqueNodes.size() < replicas && uniqueNodes.size() < ring.values().stream().distinct().count()){
+            //if we run out of nodes in the tail map, then wrap around
+            if(!it.hasNext()){
+                it = ring.keySet().iterator();
+            }
+            uniqueNodes.add(ring.get(it.next()));
+        }
+
+        nodes.addAll(uniqueNodes);
+        return nodes;
     }
 
     //using a simple long hash

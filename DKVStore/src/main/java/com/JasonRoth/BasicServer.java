@@ -69,7 +69,7 @@ public class BasicServer implements LoggingServer, Watcher {
         //This is useful when starting up many servers at once
         try{
             logger.log(Level.INFO, "Waiting for other nodes to register...");
-            Thread.sleep(2000); //2-second registration window
+            Thread.sleep(200); //2-second registration window
         }catch (InterruptedException e){
             logger.log(Level.WARNING, "Startup delay was interrupted");
             Thread.currentThread().interrupt();
@@ -77,7 +77,7 @@ public class BasicServer implements LoggingServer, Watcher {
 
         //build the initial hash ring
         try{
-            List<String> liveNodes = zkManager.getLiveNodes();
+            List<String> liveNodes = zkManager.getLiveNodes(this);
             hashingManager.updateNodes(liveNodes);
             logger.log(Level.INFO, "Initial ring built with " + liveNodes.size() + " nodes: " + liveNodes);
         } catch (KeeperException e) {
@@ -103,7 +103,7 @@ public class BasicServer implements LoggingServer, Watcher {
         if(event.getType() == Event.EventType.NodeChildrenChanged && event.getPath().equals(ZooKeeperManager.ZK_NODES_PATH)) {
             try{
                 logger.log(Level.INFO, "Node membership changed. Rebuilding hashing ring...");
-                List<String> liveNodes = zkManager.getLiveNodes();
+                List<String> liveNodes = zkManager.getLiveNodes(this);
                 hashingManager.updateNodes(liveNodes); //Re-fetch and update the ring
                 logger.log(Level.INFO, "New ring nodes: " + liveNodes);
             }catch (Exception e){

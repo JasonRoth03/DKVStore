@@ -64,6 +64,7 @@ public class GetHandler implements HttpHandler {
             String ownerNode = hashingManager.getNodeForKey(key);
             logger.log(Level.INFO, "Key Owner Node Address: " + ownerNode);
             if(ownerNode.equals(selfAddressString)){
+                logger.log(Level.INFO, "Processing Delete request on this Node");
                 String value = dataStore.get(key);
                 if (value != null) {
                     KeyValue kv = new KeyValue(key, value);

@@ -32,6 +32,10 @@ public class PeerMessageHandler implements Runnable {
         KEY_NOT_FOUND_RESPONSE((byte) 0x08),   // For GET/DELETE if key isn't on authoritative node
         ERROR_RESPONSE((byte) 0x09),           // Generic error from authoritative node
 
+        REPLICATE_PUT_REQUEST((byte) 0x0A), //leader telling follower to store data
+        REPLICATE_DELETE_REQUEST((byte) 0x0B), // Leader telling follower to delete data
+        REPLICATION_ACK((byte) 0x0C),          // Follower acknowledging a replication request
+
         UNKNOWN((byte) 0xFF);
 
         private final byte byteCode;
@@ -142,6 +146,20 @@ public class PeerMessageHandler implements Runnable {
                     }else{
                         PeerMessageFramer.writeMessage(dos, MessageType.KEY_NOT_FOUND_RESPONSE.getByteCode(), null);
                     }
+                    break;
+                case REPLICATE_PUT_REQUEST:
+                    KeyValue kvToReplicate = mapper.readValue(payloadJson, KeyValue.class);
+                    dataStore.put(kvToReplicate.getKey(), kvToReplicate.getValue());
+                    logger.log(Level.INFO, "Replicated PUT for key: {0}", kvToReplicate.getKey());
+                    // Send an acknowledgment back to the leader
+                    PeerMessageFramer.writeMessage(dos, MessageType.REPLICATION_ACK.getByteCode(), null);
+                    break;
+                case REPLICATE_DELETE_REQUEST:
+                    String keyToDelete = payloadJson;
+                    dataStore.remove(keyToDelete);
+                    logger.log(Level.INFO, "Replicated DELETE for key: {0}", keyToDelete);
+                    // Send an acknowledgment back to the leader
+                    PeerMessageFramer.writeMessage(dos, MessageType.REPLICATION_ACK.getByteCode(), null);
                     break;
                 default:
                     logger.log(Level.WARNING, "Received UNKNOWN or unhandled message type {0}.", new Object[]{messageType});
