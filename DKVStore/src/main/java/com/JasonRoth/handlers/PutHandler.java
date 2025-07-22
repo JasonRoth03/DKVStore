@@ -17,9 +17,13 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 /**
  * Handles put requests for the key value store
@@ -29,6 +33,10 @@ public class PutHandler implements HttpHandler {
     private ConsistentHashingManager hashingManager;
     private final Logger logger;
     private String selfAddressString;
+
+    private static final int REPLICATION_FACTOR = 3;
+    private static final int QUORUM = (REPLICATION_FACTOR / 2) + 1;
+    private static final ExecutorService replicationExecutor = Executors.newCachedThreadPool();
 
     public PutHandler(String selfAddressString, Map<String, String> dataStore, ConsistentHashingManager hashingManager, Logger logger) {
         this.selfAddressString = selfAddressString;
@@ -79,16 +87,62 @@ public class PutHandler implements HttpHandler {
                 HttpUtils.sendResponse(exchange, 500, message);
             }
             logger.log(Level.INFO, "Received PUT request for key: " + kv.getKey());
-            String ownerNode = hashingManager.getNodeForKey(kv.getKey());
-            logger.log(Level.INFO, "Key Owner Node Address: " + ownerNode);
+
+            List<String> responsibleNodes = hashingManager.getNodesForKey(kv.getKey(), REPLICATION_FACTOR);
+            if (responsibleNodes.size() < QUORUM) {
+                HttpUtils.sendResponse(exchange, 503, "{\"error\":\"Not enough nodes available to meet quorum\"}");
+                return;
+            }
+
+            String ownerNode = responsibleNodes.get(0);
+
+            logger.log(Level.INFO, "Key Primary Node Address: " + ownerNode);
             //Using Partition Manager
             if(ownerNode.equals(selfAddressString)){
                 //The Key belongs to this node partition
-                logger.log(Level.INFO, "Processing Put request on this Node");
+                logger.log(Level.INFO, "This node is PRIMARY for key: {0}", kv.getKey());
+                // --- QUORUM WRITE LOGIC ---
+                final CountDownLatch latch = new CountDownLatch(QUORUM -1);
+                final AtomicInteger successCount = new AtomicInteger(1); // Count self as one success
+                //Write locally
                 dataStore.put(kv.getKey(), kv.getValue());
-                ResponseMessage success = new ResponseMessage("Success", kv.getKey());
-                String message = mapper.writeValueAsString(success);
-                HttpUtils.sendResponse(exchange, 200, message);
+
+                //Asynchronously replicate to followers
+                List<String> replicas = responsibleNodes.stream().filter(n -> !n.equals(selfAddressString)).toList();
+                for(String replicaAddress : replicas){
+                    CompletableFuture.runAsync(() -> {
+                       if(replicateToNode(replicaAddress, PeerMessageHandler.MessageType.REPLICATE_PUT_REQUEST, requestBody)){
+                            successCount.incrementAndGet();
+                       }
+                       latch.countDown();
+                    }, replicationExecutor);
+                }
+
+                //wait for qurom of acks or timeout
+                try{
+                    if(latch.await(5, TimeUnit.SECONDS)){
+                        if(successCount.get() >= QUORUM){
+                            logger.log(Level.INFO, "Quorum of {0} ACKs received for key {1}. Write successful.", new Object[]{QUORUM, kv.getKey()});
+                            ResponseMessage success = new ResponseMessage("Success", kv.getKey());
+                            String message = mapper.writeValueAsString(success);
+                            HttpUtils.sendResponse(exchange, 200, message);
+                        }else{
+                            logger.log(Level.WARNING, "Write failed for key {0}, Quorum not met. Successes: {1}", new Object[]{kv.getKey(), successCount.get()});
+                            //TODO trigger a rollback
+                            HttpUtils.sendResponse(exchange, 500, "{\"error\":\"Write failed, quorum not met\"}");
+                        }
+                    }else{
+                        //timeout occurred
+                        logger.log(Level.WARNING, "Write timed out for key {0}. Quorum not met.", kv.getKey());
+                        //TODO trigger a rollback
+                        HttpUtils.sendResponse(exchange, 504, "{\"error\":\"Write timed out, quorum not met\"}");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    logger.log(Level.SEVERE, "Quorum wait interrupted for key " + kv.getKey(), e);
+                    HttpUtils.sendResponse(exchange, 500, "{\"error\":\"Server error during write operation\"}");
+                }
+                // --- END QUORUM WRITE LOGIC ---
             }else{
                 String[] ownerAddressString = ownerNode.split(":");
                 String ownerHost = ownerAddressString[0];
@@ -110,5 +164,37 @@ public class PutHandler implements HttpHandler {
                 }
             }
         }
+    }
+
+    /**
+     * Helper method now returns a boolean indicating success.
+     */
+    private boolean replicateToNode(String nodeAddress, PeerMessageHandler.MessageType messageType, String payload) {
+        try {
+            String[] parts = nodeAddress.split(":");
+            String host = parts[0];
+            int port = Integer.parseInt(parts[1]) + 2;
+
+            // Use a short timeout for replication attempts
+            try (Socket socket = new Socket()) {
+                socket.connect(new java.net.InetSocketAddress(host, port), 2000); // 2-second connect timeout
+                socket.setSoTimeout(3000); // 3-second read timeout
+
+                DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
+                DataInputStream dis = new DataInputStream(socket.getInputStream());
+
+                PeerMessageFramer.writeMessage(dos, messageType.getByteCode(), payload.getBytes(StandardCharsets.UTF_8));
+
+                // Wait for the REPLICATION_ACK from the follower
+                PeerMessageFramer.FramedMessage response = PeerMessageFramer.readNextMessage(dis);
+                if (response.messageType == PeerMessageHandler.MessageType.REPLICATION_ACK.getByteCode()) {
+                    logger.log(Level.INFO, "Successfully replicated {0} to {1}", new Object[]{messageType, nodeAddress});
+                    return true;
+                }
+            }
+        } catch (IOException e) {
+            logger.log(Level.SEVERE, "Failed to replicate to node " + nodeAddress, e);
+        }
+        return false;
     }
 }
