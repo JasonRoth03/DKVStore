@@ -78,8 +78,9 @@ public class PutHandler implements HttpHandler {
                 String message = mapper.writeValueAsString(error);
                 HttpUtils.sendResponse(exchange, 500, message);
             }
+            logger.log(Level.INFO, "Received PUT request for key: " + kv.getKey());
             String ownerNode = hashingManager.getNodeForKey(kv.getKey());
-            logger.log(Level.INFO, "Owner Node Address: " + ownerNode);
+            logger.log(Level.INFO, "Key Owner Node Address: " + ownerNode);
             //Using Partition Manager
             if(ownerNode.equals(selfAddressString)){
                 //The Key belongs to this node partition
@@ -96,8 +97,8 @@ public class PutHandler implements HttpHandler {
                     DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
                     DataInputStream dis = new DataInputStream(socket.getInputStream())){
 
-                    PeerMessageFramer.writeMessage(dos, PeerMessageHandler.MessageType.FORWARD_PUT_REQUEST.getByteCode(), requestBody.getBytes(StandardCharsets.UTF_8));
                     logger.log(Level.INFO, "Forwarding PUT request to " + ownerNode);
+                    PeerMessageFramer.writeMessage(dos, PeerMessageHandler.MessageType.FORWARD_PUT_REQUEST.getByteCode(), requestBody.getBytes(StandardCharsets.UTF_8));
 
                     //get the response back from the owner node
                     PeerMessageFramer.FramedMessage response = PeerMessageFramer.readNextMessage(dis);

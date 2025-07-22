@@ -5,11 +5,13 @@ import com.JasonRoth.handlers.GetHandler;
 import com.JasonRoth.handlers.PutHandler;
 import com.JasonRoth.Logging.LoggingServer;
 import com.sun.net.httpserver.HttpServer;
+import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
@@ -57,14 +59,35 @@ public class BasicServer implements LoggingServer, Watcher {
         try{
             //register and set a watch
             zkManager.registerNode(selfAddressString, this);
+            logger.log(Level.INFO, "Node " + selfAddressString + " registered with ZooKeeper");
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Failed to register with ZooKeeper", e);
             throw new IOException("Could not start server, ZK registration failed");
         }
+
+        //Coordinated wait. This gives all the other servers a small window to register.
+        //This is useful when starting up many servers at once
+        try{
+            logger.log(Level.INFO, "Waiting for other nodes to register...");
+            Thread.sleep(2000); //2-second registration window
+        }catch (InterruptedException e){
+            logger.log(Level.WARNING, "Startup delay was interrupted");
+            Thread.currentThread().interrupt();
+        }
+
+        //build the initial hash ring
+        try{
+            List<String> liveNodes = zkManager.getLiveNodes();
+            hashingManager.updateNodes(liveNodes);
+            logger.log(Level.INFO, "Initial ring built with " + liveNodes.size() + " nodes: " + liveNodes);
+        } catch (KeeperException e) {
+            logger.log(Level.SEVERE, "Failed to build initial ring", e);
+            throw new IOException("Could not start server, failed to build ZK ring", e);
+        }
+
         server.start(); // starts the server that handles basic http endpoints
-        tcpServer.start(); // starts the tcp server that handles internode communication on this.port + 2
+        tcpServer.start(); // starts the tcp server that handles internode communication on tcpPort
         logger.log(Level.INFO, "Server started on " + selfAddressString);
-        logger.log(Level.INFO, "Current ring nodes: " + hashingManager.ring.values());
     }
 
     public void stop() throws InterruptedException {

@@ -56,7 +56,9 @@ public class DeleteHandler implements HttpHandler {
                 String message = mapper.writeValueAsString(valueErr);
                 HttpUtils.sendResponse(exchange, 404, message);
             }
+            logger.log(Level.INFO, "Received DELETE request for key: " + key);
             String ownerNode = hashingManager.getNodeForKey(key);
+            logger.log(Level.INFO, "Key Owner Node Address: " + ownerNode);
             if(ownerNode.equals(selfAddressString)) {
                 boolean exists = dataStore.keySet().contains(key);
                 if(exists) {
@@ -81,7 +83,7 @@ public class DeleteHandler implements HttpHandler {
 
                     PeerMessageFramer.FramedMessage response = PeerMessageFramer.readNextMessage(dis);
                     PeerMessageHandler.MessageType type = PeerMessageHandler.MessageType.fromByteCode(response.messageType);
-                    logger.log(Level.INFO, "Received " + type + " from peer: " + selfAddressString);
+                    logger.log(Level.INFO, "Received " + type + " from peer: " + ownerNode);
                     String message = response.getPayloadAsString();
                     HttpUtils.sendResponse(exchange, 204, message);
                 }

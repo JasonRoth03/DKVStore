@@ -60,7 +60,9 @@ public class GetHandler implements HttpHandler {
                 String message = mapper.writeValueAsString(valueErr);
                 HttpUtils.sendResponse(exchange, 404, message);
             }
+            logger.log(Level.INFO, "Received GET request for key: " + key);
             String ownerNode = hashingManager.getNodeForKey(key);
+            logger.log(Level.INFO, "Key Owner Node Address: " + ownerNode);
             if(ownerNode.equals(selfAddressString)){
                 String value = dataStore.get(key);
                 if (value != null) {
@@ -73,18 +75,18 @@ public class GetHandler implements HttpHandler {
                     HttpUtils.sendResponse(exchange, 404, message);
                 }
             }else{
-                String[] ownerAddressString = selfAddressString.split(":");
+                String[] ownerAddressString = ownerNode.split(":");
                 String ownerHost = ownerAddressString[0];
                 int ownerPort = Integer.parseInt(ownerAddressString[1]);
                 try(Socket socket = new Socket(ownerHost, ownerPort);
                     DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
                     DataInputStream dis = new DataInputStream(socket.getInputStream())){
                     PeerMessageFramer.writeMessage(dos, PeerMessageHandler.MessageType.FORWARD_GET_REQUEST.getByteCode(), key.getBytes(StandardCharsets.UTF_8));
-                    logger.log(Level.INFO, "Forwarding GET request to " + selfAddressString);
+                    logger.log(Level.INFO, "Forwarding GET request to " + ownerNode);
                     //get the response back from the owner node
                     PeerMessageFramer.FramedMessage response = PeerMessageFramer.readNextMessage(dis);
                     PeerMessageHandler.MessageType type = PeerMessageHandler.MessageType.fromByteCode(response.messageType);
-                    logger.log(Level.INFO, "Received " + type + " from peer: " + selfAddressString);
+                    logger.log(Level.INFO, "Received " + type + " from peer: " + ownerNode);
 
                     String message = response.getPayloadAsString();
                     HttpUtils.sendResponse(exchange, 200, message);
